@@ -200,7 +200,8 @@ func (a *App) install(ctx context.Context, t *remote.Target, m *inspect.Machine,
 	}
 	defer os.RemoveAll(root)
 	if err := install.Fresh(ctx, t, root, a.Fleet, rev, a.Stdout, a.Stderr); err != nil {
-		return errs.General("%s", err).WithHint("nothing was installed if the disk was not reached; run again to retry")
+		return errs.General("%s", err).
+			WithHint("the machine may no longer run its old system; run this again to finish the install")
 	}
 	fmt.Fprintf(a.Stderr, "\nInstalled. Waiting for %s to let upstacked log in...\n", t.Host)
 	return a.waitAndReport(ctx, rev)
@@ -356,7 +357,10 @@ func (a *App) askHost(m *inspect.Machine, have *inspect.HostConfig) (*inspect.Ho
 	case have == nil:
 		// Without them the operator could not log in once the machine is
 		// installed, unless their key is one of the fleet's.
-		h.SSHKeys = agentKeys()
+		h.SSHKeys = agentKeys(a.Target)
+	}
+	if h.SSHKeys == nil {
+		h.SSHKeys = []string{}
 	}
 	return h, nil
 }
@@ -410,15 +414,28 @@ func (a *App) waitAndReport(ctx context.Context, latest string) error {
 	}
 }
 
-// agentKeys are the public keys in the operator's ssh agent.
-func agentKeys() []string {
-	out, err := exec.Command("ssh-add", "-L").Output()
+// agentKeys are the public keys in the agent ssh uses for host. That may not
+// be $SSH_AUTH_SOCK: an IdentityAgent in ssh_config, such as 1Password's,
+// wins over it, and is what logged in a moment ago.
+func agentKeys(host string) []string {
+	cmd := exec.Command("ssh-add", "-L")
+	if out, err := exec.Command("ssh", "-G", host).Output(); err == nil {
+		for _, l := range strings.Split(string(out), "\n") {
+			if sock, ok := strings.CutPrefix(l, "identityagent "); ok && sock != "none" && sock != "SSH_AUTH_SOCK" {
+				if home, err := os.UserHomeDir(); err == nil {
+					sock = strings.Replace(sock, "~", home, 1)
+				}
+				cmd.Env = append(os.Environ(), "SSH_AUTH_SOCK="+sock)
+			}
+		}
+	}
+	out, err := cmd.Output()
 	if err != nil {
 		return nil
 	}
 	var keys []string
 	for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if strings.HasPrefix(l, "ssh-") || strings.HasPrefix(l, "ecdsa-") {
+		if strings.HasPrefix(l, "ssh-") || strings.HasPrefix(l, "ecdsa-") || strings.HasPrefix(l, "sk-") {
 			keys = append(keys, l)
 		}
 	}

@@ -201,6 +201,10 @@ func (a *App) Connect(ctx context.Context) (*remote.Target, error) {
 			return t, nil
 		}
 		t.Close()
+		if remote.HostKeyChanged(err) {
+			return nil, errs.Auth("%s's host key is not the one your known_hosts has for it", a.Target).
+				WithHint("if the machine was reinstalled outside this tool, check its key, then: ssh-keygen -R %s", a.Target)
+		}
 		if !remote.Unreachable(err) {
 			return nil, errs.General("logging in to %s as %s: %s", a.Target, u, err)
 		}

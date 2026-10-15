@@ -46,6 +46,9 @@ func Fresh(ctx context.Context, t *remote.Target, root, ref, rev string, stdout,
 		"--build-on", "remote",
 		"--generate-hardware-config", "nixos-facter", filepath.Join(flakeDir, "facter.json"),
 		"--extra-files", root,
+		// The installed system keeps the machine's SSH identity, so the
+		// operator's known_hosts still trusts it afterwards.
+		"--copy-host-keys",
 	}
 	if t.Identity != "" {
 		args = append(args, "-i", t.Identity)

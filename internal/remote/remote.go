@@ -65,6 +65,9 @@ func (t *Target) SSHOptions() []string {
 func (t *Target) options() []string {
 	opts := []string{
 		"-o", "BatchMode=yes",
+		// A machine met for the first time is remembered, but one whose key
+		// has changed since is still refused: that is the check that matters.
+		"-o", "StrictHostKeyChecking=accept-new",
 		"-o", "ConnectTimeout=10",
 		"-o", "ControlMaster=auto",
 		"-o", "ControlPath=" + filepath.Join(t.control, "%C"),
@@ -93,6 +96,15 @@ func (e *Error) Error() string {
 func Unreachable(err error) bool {
 	e, ok := err.(*Error)
 	return ok && e.Code == 255
+}
+
+// HostKeyChanged is ssh refusing a machine whose host key is not the one
+// known_hosts has for it. Trying another user cannot help, and it may be an
+// attack, so it is reported rather than worked around.
+func HostKeyChanged(err error) bool {
+	e, ok := err.(*Error)
+	return ok && e.Code == 255 && (strings.Contains(e.Stderr, "REMOTE HOST IDENTIFICATION HAS CHANGED") ||
+		strings.Contains(e.Stderr, "Host key verification failed"))
 }
 
 // Run runs a shell command and returns its output.
