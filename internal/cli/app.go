@@ -40,15 +40,16 @@ type App struct {
 	AsJSON    bool
 
 	// The machine's settings, each asked for when not given.
-	Hostname     string
-	Modes        string
-	APIURL       string
-	Updates      string
-	Interval     string
-	SSHKeys      []string
-	Disk         string
-	Erase        string
-	AuthKeyStdin bool
+	Hostname      string
+	Modes         string
+	APIURL        string
+	Updates       string
+	Interval      string
+	SSHKeys       []string
+	ManagementKey bool
+	Disk          string
+	Erase         string
+	AuthKeyStdin  bool
 
 	theme *ui.Theme
 	sym   ui.Symbols
@@ -125,6 +126,29 @@ func (a *App) ReadSecret(prompt string) (string, error) {
 		return "", errs.General("cannot read %s", prompt).Wrapping(err)
 	}
 	return strings.TrimSpace(secret), nil
+}
+
+// YesNo asks a question whose answer is not a refusal either way.
+func (a *App) YesNo(prompt string, def bool) (bool, error) {
+	if !a.Interactive() {
+		return def, nil
+	}
+	hint := "y/N"
+	if def {
+		hint = "Y/n"
+	}
+	fmt.Fprintf(a.Stderr, "%s [%s]: ", prompt, hint)
+	line, err := bufio.NewReader(a.Stdin).ReadString('\n')
+	if err != nil && line == "" {
+		return false, errs.General("cannot read an answer").Wrapping(err)
+	}
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "y", "yes":
+		return true, nil
+	case "n", "no":
+		return false, nil
+	}
+	return def, nil
 }
 
 // Ask reads a visible line, offering def. A value given as a flag is used as

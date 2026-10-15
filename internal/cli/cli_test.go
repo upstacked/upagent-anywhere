@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/upstacked/upagent-anywhere/internal/errs"
 	"github.com/upstacked/upagent-anywhere/internal/inspect"
+	"github.com/upstacked/upagent-anywhere/internal/sshkeys"
 )
 
 // piped is an App whose stdin is a pipe holding input, as under CI or an
@@ -52,7 +54,7 @@ func TestSomethingThatIsNotAKeyIsRefused(t *testing.T) {
 func TestSettingsComeFromFlagsWithoutATerminal(t *testing.T) {
 	a := piped(t, "")
 	a.Hostname, a.Modes, a.Updates, a.Interval = "agent-01", "monitor,collector", "pull", "30m"
-	a.SSHKeys = []string{"ssh-ed25519 AAAA test"}
+	a.SSHKeys = []string{"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDDXfT23Ne7Rl/rdiqrLf4vWfQqgUCo26+NcL41PVSag test"}
 	h, err := a.askHost(&inspect.Machine{Hostname: "ubuntu", Arch: "aarch64"}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -93,5 +95,34 @@ func TestChoosingWithoutATerminalNamesTheFlag(t *testing.T) {
 	_, err := a.askDisk(&inspect.Machine{Disks: []inspect.Disk{{Path: "/dev/sda"}, {Path: "/dev/sdb"}}})
 	if errs.CodeOf(err) != errs.CodeUsage || errs.HintOf(err) != "pass --disk" {
 		t.Fatalf("err = %v, hint %q", err, errs.HintOf(err))
+	}
+}
+
+func TestAMachineNobodyCouldLogInToIsRefused(t *testing.T) {
+	a := piped(t, "")
+	a.Hostname = "agent-01"
+	_, err := a.askHost(&inspect.Machine{Hostname: "x"}, nil)
+	if errs.CodeOf(err) != errs.CodeUsage || !strings.Contains(errs.HintOf(err), "--management-key") {
+		t.Fatalf("err = %v, hint %q", err, errs.HintOf(err))
+	}
+}
+
+func TestTheManagementKeyIsAddedWhenAskedFor(t *testing.T) {
+	a := piped(t, "")
+	a.ManagementKey = true
+	h, err := a.askHost(&inspect.Machine{Hostname: "agent-01"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(h.SSHKeys) != 1 || !sshkeys.Same(h.SSHKeys[0], sshkeys.Management().Line) {
+		t.Fatalf("keys = %v, want only the management key", h.SSHKeys)
+	}
+}
+
+func TestAKeyFlagThatIsNotAKeyIsRefused(t *testing.T) {
+	a := piped(t, "")
+	a.SSHKeys = []string{"not-a-key-or-a-file"}
+	if _, err := a.askHost(&inspect.Machine{Hostname: "agent-01"}, nil); errs.CodeOf(err) != errs.CodeUsage {
+		t.Fatalf("err = %v, want a usage error", err)
 	}
 }

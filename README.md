@@ -39,12 +39,28 @@ built from. Nothing about one machine is committed there. What is particular
 to it lives on the machine, in `/etc/upagent`:
 
 - `host.json`: its hostname, what the agent does, how it is updated, and the
-  SSH keys that may log in as `upstacked`
+  SSH keys that may log in as `upstacked`, which are the only ones it trusts
 - `facter.json`: its hardware, as nixos-anywhere found it
 - `flake.nix` and `flake.lock`: agent-hosts, locked at the commit it runs
 
 The agent's auth key is written to `/var/lib/upagent/secrets/authkey`,
 readable only by root. It is spent the first time the agent enrols.
+
+## Who may log in
+
+A machine trusts exactly the SSH keys chosen when it was installed. The tool
+asks, in three steps:
+
+1. which of the keys it found to trust: the public keys in `~/.ssh`, and those
+   in the agent ssh uses (an `IdentityAgent` such as 1Password's included)
+2. whether to also let Upstacked's operators in with the Upstacked management
+   key, `SHA256:2wrh0NhQt7Y/VQvyylP/OdmXiqYbRhaFltALIOYtyMo`, whose public half
+   ships with the tool (`internal/sshkeys/upstacked-management.pub`)
+3. any other key, pasted or as the path of a `.pub` file
+
+It refuses to install a machine no key could log in to. Without a terminal,
+pass `--ssh-key` (a key or a `.pub` file, repeatable) and `--management-key`.
+Changing settings without naming keys keeps the ones the machine has.
 
 ## Updates
 
@@ -66,6 +82,7 @@ naming the disk.
 ```sh
 printf '%s' "$KEY" | upagent-anywhere --target-host 10.30.100.20 --user ubuntu \
   --hostname agent-07 --mode collector,monitor --updates pull \
+  --ssh-key ~/.ssh/id_ed25519.pub --management-key \
   --disk /dev/sda --erase /dev/sda --auth-key-stdin --yes
 
 upagent-anywhere status --target-host 10.30.100.20 --json

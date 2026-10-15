@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"slices"
 	"strings"
 	"time"
@@ -16,6 +15,7 @@ import (
 	"github.com/upstacked/upagent-anywhere/internal/inspect"
 	"github.com/upstacked/upagent-anywhere/internal/install"
 	"github.com/upstacked/upagent-anywhere/internal/remote"
+	"github.com/upstacked/upagent-anywhere/internal/sshkeys"
 	"github.com/upstacked/upagent-anywhere/internal/ui"
 )
 
@@ -351,16 +351,8 @@ func (a *App) askHost(m *inspect.Machine, have *inspect.HostConfig) (*inspect.Ho
 		}
 	}
 
-	switch {
-	case len(a.SSHKeys) > 0:
-		h.SSHKeys = a.SSHKeys
-	case have == nil:
-		// Without them the operator could not log in once the machine is
-		// installed, unless their key is one of the fleet's.
-		h.SSHKeys = agentKeys(a.Target)
-	}
-	if h.SSHKeys == nil {
-		h.SSHKeys = []string{}
+	if h.SSHKeys, err = a.askKeys(h.SSHKeys, have == nil); err != nil {
+		return nil, err
 	}
 	return h, nil
 }
@@ -414,32 +406,132 @@ func (a *App) waitAndReport(ctx context.Context, latest string) error {
 	}
 }
 
-// agentKeys are the public keys in the agent ssh uses for host. That may not
-// be $SSH_AUTH_SOCK: an IdentityAgent in ssh_config, such as 1Password's,
-// wins over it, and is what logged in a moment ago.
-func agentKeys(host string) []string {
-	cmd := exec.Command("ssh-add", "-L")
-	if out, err := exec.Command("ssh", "-G", host).Output(); err == nil {
-		for _, l := range strings.Split(string(out), "\n") {
-			if sock, ok := strings.CutPrefix(l, "identityagent "); ok && sock != "none" && sock != "SSH_AUTH_SOCK" {
-				if home, err := os.UserHomeDir(); err == nil {
-					sock = strings.Replace(sock, "~", home, 1)
-				}
-				cmd.Env = append(os.Environ(), "SSH_AUTH_SOCK="+sock)
+// askKeys decides which keys may log in as upstacked. The machine trusts
+// these and nothing else, so a machine left with none could never be reached
+// again: that is refused rather than installed.
+func (a *App) askKeys(current []string, fresh bool) ([]string, error) {
+	mgmt := sshkeys.Management()
+	var keys []string
+	add := func(k string) {
+		for _, have := range keys {
+			if sshkeys.Same(have, k) {
+				return
 			}
 		}
+		keys = append(keys, k)
 	}
-	out, err := cmd.Output()
-	if err != nil {
-		return nil
+
+	if !a.Interactive() {
+		for _, v := range a.SSHKeys {
+			k, err := sshkeys.FromFlag(v)
+			if err != nil {
+				return nil, errs.Usage("%s", err)
+			}
+			add(k)
+		}
+		if a.ManagementKey {
+			add(mgmt.Line)
+		}
+		// Changing settings without naming keys keeps the ones it has.
+		if len(keys) == 0 && !fresh {
+			keys = current
+		}
+		if len(keys) == 0 {
+			return nil, errs.Usage("no SSH key would be able to log in to the machine").
+				WithHint("pass --ssh-key ~/.ssh/id_ed25519.pub, or --management-key")
+		}
+		return keys, nil
 	}
-	var keys []string
-	for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if strings.HasPrefix(l, "ssh-") || strings.HasPrefix(l, "ecdsa-") || strings.HasPrefix(l, "sk-") {
-			keys = append(keys, l)
+
+	// Step one: the keys this machine has, and the ones found here.
+	var choices []ui.MultiChoice
+	offered := func(line string) bool {
+		for _, c := range choices {
+			if sshkeys.Same(c.Value, line) {
+				return true
+			}
+		}
+		return sshkeys.Same(line, mgmt.Line)
+	}
+	for _, k := range current {
+		if !offered(k) {
+			choices = append(choices, keyChoice(sshkeys.Key{Line: k, Source: "on the machine"}, true))
 		}
 	}
-	return keys
+	for _, k := range sshkeys.Discover(a.Target) {
+		if !offered(k.Line) {
+			choices = append(choices, keyChoice(k, fresh))
+		}
+	}
+	for _, v := range a.SSHKeys {
+		k, err := sshkeys.FromFlag(v)
+		if err != nil {
+			return nil, errs.Usage("%s", err)
+		}
+		if !offered(k) {
+			choices = append(choices, keyChoice(sshkeys.Key{Line: k, Source: "--ssh-key"}, true))
+		}
+	}
+	if len(choices) > 0 {
+		chosen, err := a.ChooseMany("SSH keys that may log in as upstacked", "--ssh-key", choices)
+		if err != nil {
+			return nil, err
+		}
+		for _, k := range chosen {
+			add(k)
+		}
+	} else {
+		fmt.Fprintln(a.Stderr, a.Theme().Dim.Apply("No SSH public keys found in ~/.ssh or your ssh agent."))
+	}
+
+	// Step two: the management key, for Upstacked's operators.
+	hasMgmt := a.ManagementKey
+	for _, k := range current {
+		hasMgmt = hasMgmt || sshkeys.Same(k, mgmt.Line)
+	}
+	yes, err := a.YesNo(fmt.Sprintf("Also let Upstacked's operators in with the management key (%s)?", sshkeys.Fingerprint(mgmt.Line)), hasMgmt)
+	if err != nil {
+		return nil, err
+	}
+	if yes {
+		add(mgmt.Line)
+	}
+
+	// Step three: any other key, pasted or as a file.
+	for {
+		v, err := a.Ask("Another public key, or the path of a .pub file (empty when done)", "", "")
+		if err != nil {
+			return nil, err
+		}
+		if v == "" {
+			break
+		}
+		k, err := sshkeys.FromFlag(v)
+		if err != nil {
+			fmt.Fprintf(a.Stderr, "%s %s\n", a.Sym().Fail, err)
+			continue
+		}
+		add(k)
+	}
+
+	if len(keys) == 0 {
+		return nil, errs.Usage("no SSH key would be able to log in to the machine, so nothing changed").
+			WithHint("choose a key, add the management key, or pass --ssh-key")
+	}
+	return keys, nil
+}
+
+func keyChoice(k sshkeys.Key, selected bool) ui.MultiChoice {
+	label := sshkeys.Comment(k.Line)
+	if label == "" {
+		label = strings.Fields(k.Line)[0]
+	}
+	return ui.MultiChoice{
+		Label:    label,
+		Desc:     sshkeys.Fingerprint(k.Line) + "  " + k.Source,
+		Value:    k.Line,
+		Selected: selected,
+	}
 }
 
 func splitModes(s string) []string {
