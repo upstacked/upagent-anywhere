@@ -38,6 +38,7 @@ only once the machine's name is typed, or --erase names the disk.`,
 	f.StringVar(&app.Fleet, "fleet", app.Fleet, "agent-hosts, as a flake reference")
 	f.StringVar(&app.Rev, "rev", "", "agent-hosts commit to install or update to (default: latest main)")
 	f.BoolVar(&app.AssumeYes, "yes", false, "do not prompt for confirmation (never skips --erase)")
+	f.StringVar(&app.UpstackedURL, "upstacked-url", "", "Upstacked API, which mints auth keys (default: $UPSTACKED_API_URL, else "+defaultUpstacked+")")
 
 	l := root.Flags()
 	l.StringVar(&app.Hostname, "hostname", "", "the machine's hostname (default: what it has)")
@@ -49,9 +50,12 @@ only once the machine's name is typed, or --erase names the disk.`,
 	l.BoolVar(&app.ManagementKey, "management-key", false, "also let Upstacked's operators log in with the Upstacked management key")
 	l.StringVar(&app.Disk, "disk", "", "disk to install on")
 	l.StringVar(&app.Erase, "erase", "", "confirms installing by naming the disk it erases; needed without a terminal")
-	l.BoolVar(&app.AuthKeyStdin, "auth-key-stdin", false, "read the agent's upsk- auth key from stdin")
+	l.BoolVar(&app.AuthKeyStdin, "auth-key-stdin", false, "read the agent's upsk- auth key from stdin instead of minting one")
+	l.Int64Var(&app.Infrastructure, "infrastructure", 0, "Upstacked infrastructure the agent joins (default: asks)")
 
 	root.AddCommand(
+		newLoginCmd(app),
+		newLogoutCmd(app),
 		newStatusCmd(app),
 		newUpdateCmd(app),
 		newCompletionCmd(),

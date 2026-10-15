@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/upstacked/upagent-anywhere/internal/authkey"
 	"github.com/upstacked/upagent-anywhere/internal/errs"
 	"github.com/upstacked/upagent-anywhere/internal/fleet"
 	"github.com/upstacked/upagent-anywhere/internal/inspect"
@@ -258,29 +257,6 @@ func (a *App) manage(ctx context.Context, t *remote.Target, m *inspect.Machine, 
 		fmt.Fprintf(a.Stderr, "%s The agent restarted with the new key.\n", a.Sym().OK)
 	}
 	return nil
-}
-
-// authKey gets the key the new agent enrols with.
-func (a *App) authKey(ctx context.Context, h *inspect.HostConfig) (string, error) {
-	if !a.AuthKeyStdin && !a.Interactive() {
-		return "", errs.Usage("the agent needs an auth key, and stdin is not a terminal to ask for one").
-			WithHint("pipe one in with --auth-key-stdin")
-	}
-	var src authkey.Source = authkey.Prompt{Ask: func(q string) (string, error) {
-		if a.Interactive() {
-			fmt.Fprintln(a.Stderr, a.Theme().Dim.Apply("Mint one with: upstacked-agent-api authkey create -infrastructure <id>"))
-		}
-		return a.ReadSecret(q)
-	}}
-	name := ""
-	if h != nil {
-		name = h.Hostname
-	}
-	key, err := src.AuthKey(ctx, authkey.Request{Hostname: name})
-	if err != nil {
-		return "", errs.Usage("%s", err)
-	}
-	return key, nil
 }
 
 // askHost asks for host.json's settings, starting from what the machine has.

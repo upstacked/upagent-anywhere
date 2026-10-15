@@ -51,6 +51,10 @@ type App struct {
 	Erase         string
 	AuthKeyStdin  bool
 
+	// Where keys are minted, and for which infrastructure.
+	UpstackedURL   string
+	Infrastructure int64
+
 	theme *ui.Theme
 	sym   ui.Symbols
 }

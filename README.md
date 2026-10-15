@@ -46,6 +46,27 @@ to it lives on the machine, in `/etc/upagent`:
 The agent's auth key is written to `/var/lib/upagent/secrets/authkey`,
 readable only by root. It is spent the first time the agent enrols.
 
+## Auth keys, from Upstacked
+
+Each machine's agent joins with a key of its own, minted for it when it is
+installed, so an infrastructure has as many agents as you install. You log in
+once with a device code, approved in the portal where you are already logged
+in with MFA; no password passes through this tool:
+
+```sh
+upagent-anywhere login
+```
+
+Installing then asks which of your infrastructures the agent joins, and has
+Upstacked mint a key for it. Upstacked mints only for an infrastructure your
+user may update. The session is kept in
+`~/.config/upagent-anywhere/credentials.json`, readable only by you, until it
+expires or `upagent-anywhere logout`.
+
+The Upstacked API is `--upstacked-url`, or `UPSTACKED_API_URL` as the `ups`
+CLI reads it. A key minted elsewhere can still be piped in with
+`--auth-key-stdin`.
+
 ## Who may log in
 
 A machine trusts exactly the SSH keys chosen when it was installed. The tool
@@ -80,10 +101,11 @@ fails naming the flag instead. Secrets are read from stdin, never argv.
 naming the disk.
 
 ```sh
-printf '%s' "$KEY" | upagent-anywhere --target-host 10.30.100.20 --user ubuntu \
+upagent-anywhere login            # once, approving it in the portal
+upagent-anywhere --target-host 10.30.100.20 --user ubuntu \
   --hostname agent-07 --mode collector,monitor --updates pull \
-  --ssh-key ~/.ssh/id_ed25519.pub --management-key \
-  --disk /dev/sda --erase /dev/sda --auth-key-stdin --yes
+  --ssh-key ~/.ssh/id_ed25519.pub --management-key --infrastructure 8 \
+  --disk /dev/sda --erase /dev/sda --yes
 
 upagent-anywhere status --target-host 10.30.100.20 --json
 upagent-anywhere update --target-host 10.30.100.20
