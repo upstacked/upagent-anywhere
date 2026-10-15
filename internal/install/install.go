@@ -10,8 +10,8 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"sokkel.dev/upstacked/upagent-anywhere/internal/fleet"
-	"sokkel.dev/upstacked/upagent-anywhere/internal/remote"
+	"github.com/upstacked/upagent-anywhere/internal/fleet"
+	"github.com/upstacked/upagent-anywhere/internal/remote"
 )
 
 // NixosAnywhere is pinned: an install wipes a disk, and what does it should
@@ -26,12 +26,12 @@ const NixosAnywhere = "github:nix-community/nixos-anywhere/1.13.0"
 // The machine's flake is locked to rev, the revision this run judged the
 // machine against, rather than whatever main is when the build starts. The
 // lock, not flake.nix, carries it, so pull mode still moves on from there.
-func Fresh(ctx context.Context, t *remote.Target, root, fleetURL, rev string, stdout, stderr io.Writer) error {
+func Fresh(ctx context.Context, t *remote.Target, root, ref, rev string, stdout, stderr io.Writer) error {
 	flakeDir := filepath.Join(root, fleet.FlakeDir)
 
 	lockArgs := []string{"flake", "lock", flakeDir}
 	if rev != "" {
-		lockArgs = append(lockArgs, "--override-input", "fleet", "git+"+fleetURL+"?rev="+rev)
+		lockArgs = append(lockArgs, "--override-input", "fleet", fleet.Pinned(ref, rev))
 	}
 	lock := exec.CommandContext(ctx, "nix", lockArgs...)
 	lock.Stdout, lock.Stderr = stdout, stderr

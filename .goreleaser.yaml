@@ -1,0 +1,109 @@
+version: 2
+project_name: upagent-anywhere
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+    # Completion scripts are generated from the real command tree and shipped
+    # in the archive. A cask's *_completion stanzas reference files inside the
+    # artifact, so they have to exist before archiving.
+    - mkdir -p completions
+    - sh -c 'go run ./cmd/upagent-anywhere completion bash > completions/upagent-anywhere.bash'
+    - sh -c 'go run ./cmd/upagent-anywhere completion zsh  > completions/_upagent-anywhere'
+    - sh -c 'go run ./cmd/upagent-anywhere completion fish > completions/upagent-anywhere.fish'
+
+builds:
+  - id: upagent-anywhere
+    main: ./cmd/upagent-anywhere
+    binary: upagent-anywhere
+    env:
+      - CGO_ENABLED=0
+    # No Windows: installing runs nixos-anywhere, which needs Nix and a POSIX
+    # shell on the operator's machine.
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X github.com/upstacked/upagent-anywhere/internal/cli.Version={{.Version}}
+
+archives:
+  - id: default
+    ids: [upagent-anywhere]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    formats: [tar.gz]
+    files:
+      - README.md
+      - LICENSE*
+      - src: completions/*
+        dst: completions
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+# goreleaser v2 publishes CLI binaries as Homebrew casks; `brews` is
+# deprecated. Install with:
+#   brew install upstacked/tools/upagent-anywhere
+homebrew_casks:
+  - name: upagent-anywhere
+    binaries: [upagent-anywhere]
+    repository:
+      owner: upstacked
+      name: homebrew-tools
+      # goreleaser requires this field to be exactly {{ .Env.VAR }} - any
+      # other interpolation is rejected, and only at publish time. To release
+      # without a tap token, pass --skip=homebrew rather than templating here.
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Casks
+    homepage: https://github.com/upstacked/upagent-anywhere
+    description: Install and keep up machines that run upstacked-agent
+    license: MIT
+    commit_author:
+      name: upstacked-bot
+      email: bot@upstacked.io
+    completions:
+      bash: completions/upagent-anywhere.bash
+      zsh: completions/_upagent-anywhere
+      fish: completions/upagent-anywhere.fish
+    hooks:
+      post:
+        # Downloaded binaries are quarantined by Gatekeeper on macOS, which
+        # makes the first run fail with an unhelpful dialog.
+        install: |
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr",
+                           args: ["-dr", "com.apple.quarantine", "#{staged_path}/upagent-anywhere"]
+          end
+
+release:
+  github:
+    owner: upstacked
+    name: upagent-anywhere
+  draft: false
+  prerelease: auto
+  footer: |
+    ## Install
+
+    ```sh
+    brew install upstacked/tools/upagent-anywhere
+    ```
+
+    It runs nixos-anywhere through Nix, so Nix with flakes enabled is needed
+    on the machine you run it from. Then:
+
+    ```sh
+    upagent-anywhere --target-host <address>
+    ```

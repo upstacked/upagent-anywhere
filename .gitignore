@@ -1,1 +1,6 @@
-result
+/dist/
+/upagent-anywhere
+*.test
+.DS_Store
+/completions/
+/result

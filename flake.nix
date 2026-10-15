@@ -20,8 +20,10 @@
           pname = "upagent-anywhere";
           version = self.shortRev or "dirty";
           src = ./.;
-          vendorHash = "sha256-UdRyylHSZ/b89cEArilaw6LcAw0epmpH6yCOKOiw9Gw=";
-          ldflags = [ "-X main.version=${self.shortRev or "dirty"}" ];
+          subPackages = [ "cmd/upagent-anywhere" ];
+          vendorHash = "sha256-clJqc5E8L4sv9eujlTxYVSZXE/Twr8WcroYVFWaT+as=";
+          ldflags = [ "-X main.version=${self.shortRev or "dirty"}"
+            "-X github.com/upstacked/upagent-anywhere/internal/cli.Version=${self.shortRev or "dirty"}" ];
           meta.mainProgram = "upagent-anywhere";
         };
         default = upagent-anywhere;

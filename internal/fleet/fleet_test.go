@@ -5,13 +5,13 @@ import (
 	"path/filepath"
 	"testing"
 
-	"sokkel.dev/upstacked/upagent-anywhere/internal/inspect"
+	"github.com/upstacked/upagent-anywhere/internal/inspect"
 )
 
 func TestStageLaysOutWhatTheMachineNeeds(t *testing.T) {
 	h := &inspect.HostConfig{Hostname: "agent-01", System: "x86_64-linux", Disk: "/dev/sda"}
 	h.Updates.Mode = "pull"
-	root, err := Stage(DefaultURL, h, "upsk-abc")
+	root, err := Stage(DefaultRef, h, "upsk-abc")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,5 +45,24 @@ func TestHostJSONRefusesAnUnknownUpdateMode(t *testing.T) {
 	h.Updates.Mode = "sometimes"
 	if _, err := HostJSON(h); err == nil {
 		t.Fatal("accepted an update mode of sometimes")
+	}
+}
+
+func TestReferencesPinAndResolve(t *testing.T) {
+	cases := []struct{ ref, git, pinned string }{
+		{"github:upstacked/agent-hosts", "https://github.com/upstacked/agent-hosts.git", "github:upstacked/agent-hosts/abc"},
+		{"git+file:///src/agent-hosts?ref=main", "file:///src/agent-hosts", "git+file:///src/agent-hosts?rev=abc"},
+	}
+	for _, c := range cases {
+		git, err := GitURL(c.ref)
+		if err != nil || git != c.git {
+			t.Errorf("GitURL(%s) = %s, %v; want %s", c.ref, git, err, c.git)
+		}
+		if got := Pinned(c.ref, "abc"); got != c.pinned {
+			t.Errorf("Pinned(%s) = %s, want %s", c.ref, got, c.pinned)
+		}
+	}
+	if _, err := GitURL("https://example.com/x"); err == nil {
+		t.Error("accepted a bare URL")
 	}
 }

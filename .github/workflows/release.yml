@@ -1,0 +1,65 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # The secrets context is not available in a step-level `if`, so the App id
+    # is lifted into the environment where it can be tested.
+    env:
+      TAP_APP_ID: ${{ secrets.TAP_APP_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # GITHUB_TOKEN is scoped to this repository, so it cannot push the
+      # formula to upstacked/homebrew-tools. A GitHub App installed on the tap
+      # mints a short-lived token scoped to exactly that repository, with no
+      # personal credential stored anywhere.
+      #
+      # Requires two repository secrets, TAP_APP_ID and TAP_APP_PRIVATE_KEY.
+      # Until they exist this step is skipped and the release still publishes
+      # binaries; only the cask update is deferred.
+      - name: Mint a tap token
+        id: tap-token
+        if: env.TAP_APP_ID != ''
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ env.TAP_APP_ID }}
+          private-key: ${{ secrets.TAP_APP_PRIVATE_KEY }}
+          owner: upstacked
+          repositories: homebrew-tools
+
+      # goreleaser insists the cask token field be exactly {{ .Env.VAR }}, so
+      # a missing tap token cannot be handled inside the config. The decision
+      # is made here instead: without the App, skip the cask and still publish
+      # binaries.
+      - name: Release
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: >-
+            release --clean
+            ${{ env.TAP_APP_ID == '' && '--skip=homebrew' || '' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_TOKEN: ${{ steps.tap-token.outputs.token }}
+
+      - name: Report tap status
+        if: env.TAP_APP_ID == ''
+        run: |
+          echo "::warning::TAP_APP_ID is not set, so the Homebrew cask was not updated." \
+               "Binaries published normally. See docs/releasing.md."

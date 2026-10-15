@@ -12,12 +12,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"sokkel.dev/upstacked/upagent-anywhere/internal/inspect"
+	"github.com/upstacked/upagent-anywhere/internal/inspect"
 )
 
-// DefaultURL is agent-hosts. It is public, so a machine in pull mode reads it
-// without credentials.
-const DefaultURL = "https://sokkel.dev/upstacked/agent-hosts.git"
+// DefaultRef is agent-hosts, as a flake reference. It is public, so a
+// machine in pull mode reads it without credentials.
+const DefaultRef = "github:upstacked/agent-hosts"
 
 // Paths on the machine.
 const (
@@ -25,8 +25,38 @@ const (
 	AuthKeyPath = "/var/lib/upagent/secrets/authkey"
 )
 
+// GitURL is where git finds a flake reference: github:owner/repo, or
+// git+<url> for a fork or a local checkout.
+func GitURL(ref string) (string, error) {
+	switch {
+	case strings.HasPrefix(ref, "github:"):
+		path := strings.TrimPrefix(ref, "github:")
+		if strings.Count(path, "/") != 1 {
+			return "", fmt.Errorf("%s names no single repository", ref)
+		}
+		return "https://github.com/" + path + ".git", nil
+	case strings.HasPrefix(ref, "git+"):
+		url, _, _ := strings.Cut(strings.TrimPrefix(ref, "git+"), "?")
+		return url, nil
+	}
+	return "", fmt.Errorf("%s is neither github:owner/repo nor git+<url>", ref)
+}
+
+// Pinned is ref at one commit.
+func Pinned(ref, rev string) string {
+	if strings.HasPrefix(ref, "github:") {
+		return ref + "/" + rev
+	}
+	base, _, _ := strings.Cut(ref, "?")
+	return base + "?rev=" + rev
+}
+
 // Latest is the commit at the head of agent-hosts' main branch.
-func Latest(ctx context.Context, url string) (string, error) {
+func Latest(ctx context.Context, ref string) (string, error) {
+	url, err := GitURL(ref)
+	if err != nil {
+		return "", err
+	}
 	out, err := exec.CommandContext(ctx, "git", "ls-remote", url, "refs/heads/main").Output()
 	if err != nil {
 		return "", fmt.Errorf("reading agent-hosts at %s: %w", url, err)
@@ -38,17 +68,18 @@ func Latest(ctx context.Context, url string) (string, error) {
 	return rev, nil
 }
 
-// Flake is the flake.nix a machine builds itself with.
-func Flake(url string) []byte {
+// Flake is the flake.nix a machine builds itself with. It names agent-hosts
+// unpinned; the lock beside it holds the commit, so updating moves the lock.
+func Flake(ref string) []byte {
 	return []byte(fmt.Sprintf(`# Written by upagent-anywhere. This machine is built from agent-hosts; what
 # is particular to it is host.json, beside this file.
 {
-  inputs.fleet.url = "git+%s";
+  inputs.fleet.url = "%s";
   outputs = { fleet, ... }: {
     nixosConfigurations.host = fleet.lib.mkHost ./.;
   };
 }
-`, url))
+`, ref))
 }
 
 // HostJSON encodes host.json as agent-hosts reads it.
@@ -69,7 +100,7 @@ func HostJSON(h *inspect.HostConfig) ([]byte, error) {
 // Stage lays out what nixos-anywhere copies onto a fresh install, rooted at
 // the returned directory: the machine's flake in etc/upagent, and the auth key
 // where the agent's unit loads it from.
-func Stage(url string, h *inspect.HostConfig, authKey string) (string, error) {
+func Stage(ref string, h *inspect.HostConfig, authKey string) (string, error) {
 	host, err := HostJSON(h)
 	if err != nil {
 		return "", err
@@ -83,7 +114,7 @@ func Stage(url string, h *inspect.HostConfig, authKey string) (string, error) {
 		mode os.FileMode
 		body []byte
 	}{
-		{filepath.Join(root, FlakeDir, "flake.nix"), 0o644, Flake(url)},
+		{filepath.Join(root, FlakeDir, "flake.nix"), 0o644, Flake(ref)},
 		{filepath.Join(root, FlakeDir, "host.json"), 0o644, host},
 		{filepath.Join(root, AuthKeyPath), 0o600, []byte(authKey + "\n")},
 	}
