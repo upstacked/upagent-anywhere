@@ -88,7 +88,8 @@ func (a *App) runUpdate(ctx context.Context, t *remote.Target, rev string) error
 		return errs.General("updating %s: %s", a.Target, err).
 			WithHint("the machine keeps running what it ran; /var/lib/upagent/last-update.json says why")
 	}
-	fmt.Fprintf(a.Stderr, "%s %s is at agent-hosts %s.\n", a.Sym().OK, a.Target, short(rev))
+	// nixos-rebuild does not always end its output with a newline.
+	fmt.Fprintf(a.Stderr, "\n%s %s is at agent-hosts %s.\n", a.Sym().OK, a.Target, short(rev))
 	return nil
 }
 
